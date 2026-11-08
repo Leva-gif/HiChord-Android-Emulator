@@ -1,0 +1,43 @@
+name: Build HiChord Pocket APK
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK, NDK and CMake
+        uses: android-actions/setup-android@v3
+
+      - name: Install Exact NDK and CMake Components
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
+
+      - name: Setup Gradle 8.6
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.6'
+
+      - name: Build Debug APK (Kotlin + C++ Oboe DSP)
+        run: gradle assembleDebug --stacktrace
+
+      - name: Upload Ready APK to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: HiChordPocket-StageA-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk

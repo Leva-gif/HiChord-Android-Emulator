@@ -1,0 +1,1 @@
+-keep class com.hichord.pocket.audio.NativeAudioBridge { *; }
