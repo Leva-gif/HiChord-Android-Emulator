@@ -7,6 +7,17 @@ on:
   workflow_dispatch:
 
 jobs:
+  test-dsp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test real DSP core with ThreadSanitizer
+        run: |
+          sudo sysctl -w vm.mmap_rnd_bits=28
+          cmake -S tests -B build/dsp-tests -DENABLE_TSAN=ON
+          cmake --build build/dsp-tests
+          ctest --test-dir build/dsp-tests --output-on-failure
+
   build-android-apk:
     runs-on: ubuntu-latest
 
@@ -21,7 +32,7 @@ jobs:
           java-version: '17'
 
       - name: Setup Android SDK, NDK and CMake
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Exact NDK and CMake Components
         run: |
@@ -34,10 +45,30 @@ jobs:
           gradle-version: '8.6'
 
       - name: Build Debug APK (Kotlin + C++ Oboe DSP)
-        run: gradle assembleDebug --stacktrace
+        run: gradle testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --stacktrace
 
       - name: Upload Ready APK to Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: HiChordPocket-StageA-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Enable KVM for Android instrumentation
+        run: sudo chmod 666 /dev/kvm
+
+      - name: Test multitouch, joystick and Oboe on Android 34
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: gradle connectedDebugAndroidTest --stacktrace
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StageA-test-reports
+          path: app/build/reports/

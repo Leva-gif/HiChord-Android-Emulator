@@ -3,6 +3,7 @@ package com.hichord.pocket.state
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.hichord.pocket.audio.NativeAudioBridge
+import com.hichord.pocket.audio.AudioEngine
 import com.hichord.pocket.theory.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -54,7 +55,7 @@ data class HiChordUiState(
     val latencyMs: Double = 0.0
 )
 
-class HiChordViewModel : ViewModel() {
+class HiChordViewModel(private val audio: AudioEngine = NativeAudioBridge) : ViewModel() {
 
     val presets = listOf(
         PresetInfo(0, "WARM FM PIANO", 3400f),
@@ -72,14 +73,26 @@ class HiChordViewModel : ViewModel() {
 
     private var patternJob: Job? = null
     private var arpStepIndex = 0
+    private var latencyJob: Job? = null
 
     fun onEngineStarted() {
         val s = _uiState.value
-        NativeAudioBridge.applyPreset(s.presetIndex)
-        refreshLatency()
+        audio.applyPreset(s.presetIndex)
+        audio.setFilterCutoff(s.filterCutoffHz)
+        audio.setPitchBend(0f)
+        audio.setVibrato(0f)
+        latencyJob?.cancel()
+        latencyJob = viewModelScope.launch {
+            while (isActive) {
+                refreshLatency()
+                delay(1000)
+            }
+        }
     }
 
     fun onEngineStopped() {
+        latencyJob?.cancel()
+        latencyJob = null
         stopAllPlayingNotes()
         _uiState.update {
             it.copy(
@@ -95,7 +108,7 @@ class HiChordViewModel : ViewModel() {
     }
 
     fun refreshLatency() {
-        val lat = NativeAudioBridge.getLatencyMillis()
+        val lat = audio.getLatencyMillis()
         _uiState.update { it.copy(latencyMs = lat) }
     }
 
@@ -108,6 +121,7 @@ class HiChordViewModel : ViewModel() {
     }
 
     fun onChordButtonDown(buttonId: Int) {
+        if (buttonId !in 1..7 || buttonId in _uiState.value.pressedButtons) return
         val state = _uiState.value
 
         when (state.activeMenu) {
@@ -151,7 +165,7 @@ class HiChordViewModel : ViewModel() {
         // Ignore release of a settings key that was never registered as a note.
         if (buttonId !in state.pressedButtons) return
         val remaining = state.pressedButtons - buttonId
-        val nextActive = remaining.lastOrNull()
+        val nextActive = if (state.activeButtonId in remaining) state.activeButtonId else remaining.lastOrNull()
 
         _uiState.update {
             it.copy(
@@ -160,9 +174,9 @@ class HiChordViewModel : ViewModel() {
             )
         }
 
-        if (nextActive != null) {
+        if (nextActive != null && nextActive != state.activeButtonId) {
             triggerOrUpdateActiveChord(isNewPress = false)
-        } else {
+        } else if (nextActive == null) {
             if (state.playMode != PlayMode.DRONE) {
                 stopAllPlayingNotes()
             }
@@ -280,16 +294,18 @@ class HiChordViewModel : ViewModel() {
             val next = layouts[(it.buttonLayoutMode.ordinal + 1) % layouts.size]
             it.copy(buttonLayoutMode = next)
         }
+        if (_uiState.value.activeButtonId != null) triggerOrUpdateActiveChord(false)
     }
 
     fun toggleVoiceLeading() {
         _uiState.update { it.copy(smartVoiceLeading = !it.smartVoiceLeading) }
+        if (_uiState.value.activeButtonId != null) triggerOrUpdateActiveChord(false)
     }
 
     fun selectPreset(index: Int) {
         val safeIdx = index.coerceIn(0, presets.lastIndex)
         val preset = presets[safeIdx]
-        NativeAudioBridge.applyPreset(safeIdx)
+        audio.applyPreset(safeIdx)
         _uiState.update {
             it.copy(
                 presetIndex = safeIdx,
@@ -301,7 +317,7 @@ class HiChordViewModel : ViewModel() {
     fun adjustCutoff(deltaHz: Float) {
         _uiState.update {
             val next = (it.filterCutoffHz + deltaHz).coerceIn(180f, 12000f)
-            NativeAudioBridge.setFilterCutoff(next)
+            audio.setFilterCutoff(next)
             it.copy(filterCutoffHz = next)
         }
     }
@@ -340,26 +356,28 @@ class HiChordViewModel : ViewModel() {
         when (s.playMode) {
             PlayMode.CHORD, PlayMode.DRONE -> {
                 patternJob?.cancel()
-                NativeAudioBridge.setChordNotes(voicing.midiNotes, 0.85f)
+                audio.setChordNotes(voicing.midiNotes, 0.85f)
             }
             PlayMode.LEAD -> {
                 patternJob?.cancel()
                 val leadNote = voicing.midiNotes.lastOrNull() ?: 60
-                NativeAudioBridge.setChordNotes(intArrayOf(leadNote), 0.92f)
+                audio.setChordNotes(intArrayOf(leadNote), 0.92f)
             }
             PlayMode.STRUM -> {
                 if (isNewPress) {
                     patternJob?.cancel()
                     patternJob = viewModelScope.launch {
-                        NativeAudioBridge.allNotesOff()
+                        audio.allNotesOff()
                         for (note in voicing.midiNotes) {
                             if (!isActive) break
-                            NativeAudioBridge.noteOn(note, 0.85f)
+                            audio.noteOn(note, 0.85f)
                             delay(34L)
                         }
                     }
                 } else {
-                    NativeAudioBridge.setChordNotes(voicing.midiNotes, 0.82f)
+                    patternJob?.cancel()
+                    patternJob = null
+                    audio.setChordNotes(voicing.midiNotes, 0.82f)
                 }
             }
             PlayMode.ARP_UP, PlayMode.ARP_DOWN, PlayMode.ARP_UP_DOWN -> {
@@ -371,8 +389,8 @@ class HiChordViewModel : ViewModel() {
                             val notes = current.currentNotes
                             if (notes.isNotEmpty()) {
                                 val noteToPlay = pickArpNote(notes, current.playMode, arpStepIndex++)
-                                NativeAudioBridge.allNotesOff()
-                                NativeAudioBridge.noteOn(noteToPlay, 0.88f)
+                                audio.allNotesOff()
+                                audio.noteOn(noteToPlay, 0.88f)
                             }
                             val stepMs = (60_000L / current.bpm.coerceAtLeast(40)) / 2L
                             delay(stepMs)
@@ -397,10 +415,23 @@ class HiChordViewModel : ViewModel() {
         }
     }
 
+    fun cancelTouches() {
+        stopAllPlayingNotes()
+        _uiState.update { it.copy(pressedButtons = emptySet(), activeButtonId = null,
+            joystickDirection = JoystickDirection.CENTER, joystickX = 0f, joystickY = 0f,
+            currentNotes = emptyList()) }
+    }
+
+    override fun onCleared() {
+        latencyJob?.cancel()
+        stopAllPlayingNotes()
+        super.onCleared()
+    }
+
     private fun stopAllPlayingNotes() {
         patternJob?.cancel()
         patternJob = null
-        NativeAudioBridge.allNotesOff()
+        audio.allNotesOff()
     }
 
     private fun buildVoicingForState(state: HiChordUiState, buttonId: Int): ChordVoicing {

@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.testTag
 import com.hichord.pocket.state.ActiveMenu
 import com.hichord.pocket.state.HiChordUiState
 import com.hichord.pocket.state.HiChordViewModel
@@ -74,13 +75,16 @@ fun ClassicHiChordScreen(viewModel: HiChordViewModel) {
                 )
                 .border(3.dp, Color(0xFFA5A39D), RoundedCornerShape(24.dp))
                 .onGloballyPositioned { surfaceRootOffset = it.positionInRoot() }
+                .testTag("instrument")
                 .pointerInput(Unit) {
                     var joystickPointerId: PointerId? = null
                     var joystickMovedFar = false
                     val chordPointers = mutableMapOf<PointerId, Int>()
                     val consumedFuncPointers = mutableSetOf<PointerId>()
 
+                    try {
                     awaitEachGesture {
+                        try {
                         while (true) {
                             val event = awaitPointerEvent()
                             val activeChanges = event.changes
@@ -135,8 +139,9 @@ fun ClassicHiChordScreen(viewModel: HiChordViewModel) {
                                                 }
                                             }
                                             if (hitBtn != null) {
+                                                val alreadyHeld = chordPointers.containsValue(hitBtn)
                                                 chordPointers[pid] = hitBtn
-                                                viewModel.onChordButtonDown(hitBtn)
+                                                if (!alreadyHeld) viewModel.onChordButtonDown(hitBtn)
                                             }
                                         }
                                         change.consume()
@@ -160,6 +165,17 @@ fun ClassicHiChordScreen(viewModel: HiChordViewModel) {
 
                             if (activeChanges.none { it.pressed }) break
                         }
+                        } finally {
+                            if (chordPointers.isNotEmpty() || joystickPointerId != null) {
+                                viewModel.cancelTouches()
+                            }
+                            chordPointers.clear()
+                            consumedFuncPointers.clear()
+                            joystickPointerId = null
+                        }
+                    }
+                    } finally {
+                        viewModel.cancelTouches()
                     }
                 }
                 .padding(14.dp)
@@ -243,6 +259,7 @@ private fun LeftHardwareSection(
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.70f)
+                    .testTag("joystick")
                     .aspectRatio(1f)
                     .onGloballyPositioned { coords ->
                         onJoystickPositioned(coords.boundsInRoot())
@@ -682,6 +699,7 @@ private fun ChordHardwareKey(
 
     Box(
         modifier = modifier
+            .testTag("chord-$buttonId")
             .clip(RoundedCornerShape(8.dp))
             .background(if (isPressed) Color(0xFFE3DAC8) else Color(0xFFF6EFE0))
             .border(
