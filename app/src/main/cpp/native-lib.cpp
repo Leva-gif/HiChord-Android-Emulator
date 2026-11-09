@@ -32,10 +32,12 @@ Java_com_hichord_pocket_audio_NativeAudioBridge_setChordNotes(
     jintArray notesArray,
     jfloat velocity
 ) {
-    jsize len = env->GetArrayLength(notesArray);
-    jint* body = env->GetIntArrayElements(notesArray, nullptr);
-    gEngine.setChordNotes(body, static_cast<int>(len), static_cast<float>(velocity));
-    env->ReleaseIntArrayElements(notesArray, body, JNI_ABORT);
+    if (!notesArray) return;
+    const jsize len = std::min(env->GetArrayLength(notesArray), hichord::kMaxVoices);
+    jint notes[hichord::kMaxVoices]{};
+    env->GetIntArrayRegion(notesArray, 0, len, notes);
+    if (env->ExceptionCheck()) return;
+    gEngine.setChordNotes(notes, len, velocity);
 }
 
 JNIEXPORT void JNICALL

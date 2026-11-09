@@ -200,7 +200,12 @@ object MusicTheoryEngine {
                     JoystickDirection.SOUTH_EAST -> {
                         extraIntervals.add(diatonicSeventh)
                         inversionShift = 1
-                        suffix = if (isInitiallyMinor) "m7/3" else "maj7/3"
+                        suffix = when {
+                            isInitiallyDim -> "m7b5/3"
+                            isInitiallyMinor -> "m7/3"
+                            diatonicSeventh == 11 -> "maj7/3"
+                            else -> "7/3"
+                        }
                     }
                 }
             }
@@ -217,7 +222,7 @@ object MusicTheoryEngine {
         }
 
         val baseMidiRoot = 60 + rootKeySemitone + rootOffset + (octaveOffset * 12)
-        val bassNote = baseMidiRoot - 12
+        var bassNote = baseMidiRoot - 12
 
         val rawChordNotes = mutableListOf(
             baseMidiRoot,
@@ -235,8 +240,21 @@ object MusicTheoryEngine {
                 while (n - centerTarget > 7) n -= 12
                 while (centerTarget - n > 6) n += 12
             }
-            n + (inversionShift * 12)
-        }.sorted()
+            n
+        }.sorted().toMutableList()
+
+        // Rotate individual voices; shifting every note only transposes the chord.
+        if (inversionShift > 0) repeat(inversionShift) {
+            voicedUpper.add(voicedUpper.removeAt(0) + 12)
+        }
+        if (inversionShift < 0) repeat(-inversionShift) {
+            voicedUpper.add(0, voicedUpper.removeAt(voicedUpper.lastIndex) - 12)
+        }
+        if (inversionShift != 0) {
+            val bassIndex = Math.floorMod(inversionShift, rawChordNotes.size)
+            bassNote = rawChordNotes[bassIndex] - 12
+            while (bassNote >= voicedUpper.first()) bassNote -= 12
+        }
 
         val allNotes = (listOf(bassNote) + voicedUpper)
             .map { it.coerceIn(24, 104) }

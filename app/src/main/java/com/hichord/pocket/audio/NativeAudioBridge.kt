@@ -1,22 +1,22 @@
 package com.hichord.pocket.audio
 
-object NativeAudioBridge {
+object NativeAudioBridge : AudioEngine {
     init {
         System.loadLibrary("hichord_dsp")
     }
 
     external fun startEngine(): Boolean
     external fun stopEngine()
-    external fun noteOn(midiNote: Int, velocity: Float = 0.85f)
+    external override fun noteOn(midiNote: Int, velocity: Float)
     external fun noteOff(midiNote: Int)
-    external fun setChordNotes(notes: IntArray, velocity: Float = 0.85f)
-    external fun allNotesOff()
-    external fun applyPreset(index: Int)
-    external fun setFilterCutoff(cutoffHz: Float)
+    external override fun setChordNotes(notes: IntArray, velocity: Float)
+    external override fun allNotesOff()
+    external override fun applyPreset(index: Int)
+    external override fun setFilterCutoff(cutoffHz: Float)
     external fun setFilterResonance(resonance: Float)
     external fun setReverbMix(mix: Float)
     external fun setDelayMix(mix: Float)
-    external fun setPitchBend(semitones: Float)
-    external fun setVibrato(depth: Float)
-    external fun getLatencyMillis(): Double
+    external override fun setPitchBend(semitones: Float)
+    external override fun setVibrato(depth: Float)
+    external override fun getLatencyMillis(): Double
 }
